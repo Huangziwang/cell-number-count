@@ -1,0 +1,110 @@
+#include <opencv2/opencv.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/core/core.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include <iostream>
+
+using namespace std;
+using namespace cv;
+
+int main(int argc, char** argv) {
+	Mat src;
+	char* filename = "D:/temp/sysu/4x--1.bmp";
+	src = imread(filename);
+	if (src.empty()) {
+		cout << "Could not load image ..." << endl;
+		return -1;
+	}
+	cout << "The shape of this image is " << src.rows << " x " << src.cols << " x " << src.channels() << endl;
+	imshow("input image", src);
+
+	// 3x3 Gaussian filtering of the image
+	Mat gaussianImage;
+	GaussianBlur(src, gaussianImage, Size(3, 3), 0);
+
+	// convert to gray image
+	Mat grayImage;
+	cvtColor(gaussianImage, grayImage, CV_BGR2GRAY);
+	imshow("gray image", grayImage);
+
+	// adaptive threshold for changing image to binary image
+	Mat binImage;
+	adaptiveThreshold(grayImage, binImage, 255, ADAPTIVE_THRESH_MEAN_C, THRESH_BINARY, 25, 10);
+	imshow("binary image", binImage);
+
+	// Morphological manipulation of the resulting image for further processing
+	Mat MorImage;
+	Mat kernel = getStructuringElement(MORPH_RECT, Size(5, 5), Point(-1, -1));
+	Mat kernel1 = getStructuringElement(MORPH_RECT, Size(3, 3), Point(-1, -1));
+	dilate(binImage, MorImage, kernel);
+	erode(MorImage, MorImage, kernel1);
+	imshow("Mor image", MorImage);
+
+	medianBlur(MorImage, MorImage, 3); 
+	imshow("medianBlur", MorImage);
+
+	// markers
+	Mat uint8Image;
+	MorImage.convertTo(uint8Image, CV_8U);
+	vector<vector<Point>> contours;
+	findContours(uint8Image, contours, CV_RETR_TREE, CV_CHAIN_APPROX_NONE, Point(0,0));
+
+	// create markers
+	Mat markers = Mat::zeros(src.size(), CV_32SC1);
+	for (size_t t = 0; t < contours.size(); t++) {
+		drawContours(markers, contours, static_cast<int>(t), Scalar::all(static_cast<int>(t) + 1), -1);
+	} 
+	
+	// use watershed algorthim to segmentation
+	watershed(src, markers);
+	Mat mark = Mat::zeros(markers.size(), CV_8UC1);
+	markers.convertTo(mark, CV_8UC1);
+	bitwise_not(mark, mark, Mat());
+	// imshow("watershed result", mark);
+
+	// generate random color
+	vector<Vec3b> colors;
+	for (size_t i = 0; i < contours.size(); i++) {
+		int r = theRNG().uniform(0, 255);
+		int g = theRNG().uniform(0, 255);
+		int b = theRNG().uniform(0, 255);
+		colors.push_back(Vec3b((uchar)b, (uchar)g, (uchar)r));
+	}
+
+	// fill with color and display final result
+	Mat dst = Mat::zeros(markers.size(), CV_8UC3);
+	int index = 0;
+	for (int row = 0; row < markers.rows; row++) {
+		for (int col = 0; col < markers.cols; col++) {
+			index = markers.at<int>(row, col);
+			if (index > 0 && index <= contours.size()) {
+				dst.at<Vec3b>(row, col) = colors[index - 1];
+			}
+			else {
+				dst.at<Vec3b>(row, col) = Vec3b(0, 0, 0);
+			}
+		}
+	}
+	imshow("Final Result", dst);
+	cout << "number of objects : " << contours.size() << endl;
+
+	// 
+	Mat m1;
+	src.convertTo(m1, CV_32F);
+	Mat pst;
+	src.copyTo(pst);
+	for (int row = 0; row < src.rows; row++) {
+		for (int col = 0; col < src.cols; col++) {
+			if (src.channels() == 3) {
+				if (MorImage.at<uchar>(row, col) != 0) {
+					pst.at<Vec3b>(row, col)[2] = saturate_cast<uchar>(255);
+					pst.at<Vec3b>(row, col)[1] = saturate_cast<uchar>(0);
+					pst.at<Vec3b>(row, col)[0] = saturate_cast<uchar>(0);
+				}
+			}
+		}
+	}
+	imshow("Result", pst);
+	waitKey(0);
+	return 0;
+}
